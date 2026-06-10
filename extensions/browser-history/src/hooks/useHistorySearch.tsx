@@ -2,7 +2,7 @@ import { existsSync } from "fs";
 import { useSQL } from "@raycast/utils";
 import { HistoryEntry, HistoryQueryFunction, SearchResult, SupportedBrowsers } from "../interfaces";
 import { getHistoryDateColumn, getHistoryDbPath, getHistoryTable } from "../util";
-import { NotInstalledError } from "../components";
+import { DatabasePermissionError, NotInstalledError, UnknownError } from "../components";
 
 const whereClauses = (tableTitle: string, terms: string[], tableUrl?: string) => {
   const urlTable = tableUrl || tableTitle;
@@ -72,12 +72,27 @@ const searchHistory = (
     };
   }
 
-  const { data, isLoading, permissionView } = useSQL<HistoryEntry>(dbPath, queries);
+  const { data, isLoading, permissionView, error } = useSQL<HistoryEntry>(dbPath, queries);
+  let finalPermissionView = permissionView ? <DatabasePermissionError browser={browser} /> : undefined;
+
+  if (error) {
+    const isPermissionError =
+      error.message?.toLowerCase().includes("permission") ||
+      error.message?.toLowerCase().includes("access") ||
+      error.name?.toLowerCase().includes("permission");
+
+    if (isPermissionError) {
+      finalPermissionView = <DatabasePermissionError browser={browser} />;
+    } else {
+      finalPermissionView = <UnknownError message={error.message} />;
+    }
+  }
+
   return {
     browser,
     data: data?.map((d) => ({ ...d, id: `${browser}-${d.id}`, browser: browser })),
     isLoading,
-    permissionView,
+    permissionView: finalPermissionView,
   };
 };
 
