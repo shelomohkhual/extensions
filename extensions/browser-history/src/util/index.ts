@@ -32,9 +32,35 @@ const userLibraryDirectoryPath = () => {
 const getProfileName = (userDirectoryPath: string, browser: SupportedBrowsers) => {
   let profiles;
   switch (browser) {
-    case SupportedBrowsers.Firefox:
-      profiles = fs.readdirSync(userDirectoryPath);
-      return profiles.filter((profile) => profile.endsWith(".default-release"))[0];
+    case SupportedBrowsers.Firefox: {
+      if (!fs.existsSync(userDirectoryPath)) {
+        return "";
+      }
+      try {
+        profiles = fs.readdirSync(userDirectoryPath);
+        // Look for .default-release first
+        let profile = profiles.find((p) => p.endsWith(".default-release"));
+        if (profile) return profile;
+
+        // Then .default
+        profile = profiles.find((p) => p.endsWith(".default"));
+        if (profile) return profile;
+
+        // Fallback to any directory that is not a hidden dotfile
+        profile = profiles.find((p) => {
+          if (p.startsWith(".")) return false;
+          try {
+            return fs.statSync(path.join(userDirectoryPath, p)).isDirectory();
+          } catch {
+            return false;
+          }
+        });
+        return profile || "";
+      } catch (error) {
+        console.error("Error reading Firefox profiles directory:", error);
+        return "";
+      }
+    }
     default:
       return "Default";
   }
