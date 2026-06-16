@@ -1,7 +1,7 @@
 import { existsSync } from "fs";
 import { useSQL } from "@raycast/utils";
 import { HistoryEntry, HistoryQueryFunction, SearchResult, SupportedBrowsers } from "../interfaces";
-import { getHistoryDateColumn, getHistoryDbPath, getHistoryTable } from "../util";
+import { getHistoryDateColumn, getHistoryTable } from "../util";
 import { DatabasePermissionError, NotInstalledError, UnknownError } from "../components";
 
 const whereClauses = (tableTitle: string, terms: string[], tableUrl?: string) => {
@@ -57,11 +57,11 @@ const searchHistory = (
   table: string,
   date_field: string,
   queryBuilder: (table: string, date_field: string, terms: string[]) => string,
+  dbPath: string,
   query?: string,
 ): SearchResult => {
   const terms = query ? query.trim().split(" ") : [""];
   const queries = queryBuilder(table, date_field, terms);
-  const dbPath = getHistoryDbPath(browser);
 
   if (!existsSync(dbPath)) {
     return {
@@ -96,12 +96,13 @@ const searchHistory = (
   };
 };
 
-export function useHistorySearch(browser: SupportedBrowsers, query: string | undefined): SearchResult {
+export function useHistorySearch(browser: SupportedBrowsers, dbPath: string, query: string | undefined): SearchResult {
   return searchHistory(
     browser,
     getHistoryTable(browser),
     getHistoryDateColumn(browser),
     getHistoryQuery(browser),
+    dbPath,
     query,
   );
 }

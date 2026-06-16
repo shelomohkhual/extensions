@@ -32,6 +32,8 @@ export interface Preferences {
   readonly profilePathComet?: string;
   readonly profilePathChatGPTAtlas?: string;
   readonly firstInResults: SupportedBrowsers;
+  readonly firstInResultsMode: "most_relevant" | "specific_browser";
+  readonly browserSelectionMode: "all" | "installed" | "custom";
   readonly defaultBrowser?: SupportedBrowsers & "Default";
   readonly searchEngine?: string;
 }

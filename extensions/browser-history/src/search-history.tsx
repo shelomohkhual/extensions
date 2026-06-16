@@ -1,80 +1,228 @@
-import { ActionPanel, Action, getPreferenceValues, List } from "@raycast/api";
+import { ActionPanel, Action, getPreferenceValues, List, Cache, useNavigation, Icon } from "@raycast/api";
 import { useHistorySearch } from "./hooks/useHistorySearch";
-import { ReactElement, isValidElement, useState } from "react";
-import { Preferences, SupportedBrowsers } from "./interfaces";
-import { BrowserHistoryActions, ListEntries } from "./components";
+import { ReactElement, isValidElement, useState, useCallback, useEffect } from "react";
+import { Preferences, SupportedBrowsers, SearchResult } from "./interfaces";
+import { BrowserHistoryActions, ListEntries, ConfigureProfilesForm } from "./components";
+import { isBrowserInstalled, resolveProfilePaths } from "./util";
+
+function BrowserProfileQuery({
+  profileKey,
+  browser,
+  dbPath,
+  searchText,
+  onResult,
+}: {
+  profileKey: string;
+  browser: SupportedBrowsers;
+  dbPath: string;
+  searchText: string;
+  onResult: (key: string, res: SearchResult) => void;
+}) {
+  const result = useHistorySearch(browser, dbPath, searchText);
+
+  useEffect(() => {
+    onResult(profileKey, result);
+  }, [result.isLoading, result.permissionView, result.data]);
+
+  return null;
+}
 
 export default function Command(): ReactElement {
   const preferences = getPreferenceValues<Preferences>();
-  const enabled = Object.entries(preferences).filter(([key, value]) => key.startsWith("enable") && value).length > 0;
   const [searchText, setSearchText] = useState<string>();
+  const [results, setResults] = useState<Record<string, SearchResult>>({});
 
-  const isLoading: boolean[] = [];
-  const permissionView: ReactElement[] = [];
-  let noHistory = true;
-  const searchTextEncoded = encodeURIComponent(searchText ?? "");
-  const searchEngine = preferences.searchEngine;
-  const searchUrl = searchEngine
-    ? searchEngine.replace(/{{query}}/g, searchTextEncoded)
-    : `https://www.google.com/search?q=${searchTextEncoded}`;
+  const cache = new Cache();
+  const navigation = useNavigation();
 
-  let entries = Object.entries(preferences)
-    .filter(([key, val]) => key.startsWith("enable") && val)
-    .map(([key]) => useHistorySearch(key.replace("enable", "") as SupportedBrowsers, searchText))
-    .map((entry) => {
-      if (entry.permissionView) {
-        if (entry.permissionView && isValidElement(entry.permissionView)) {
-          permissionView.push(entry.permissionView);
-        }
-      }
-      isLoading.push(entry.isLoading);
+  // 1. Determine active/enabled browsers based on selection mode
+  const enabledBrowsers = Object.values(SupportedBrowsers).filter((browser) => {
+    // Check if skipped/disabled in cache
+    if (cache.get(`disabled_${browser}`) === "true") {
+      return false;
+    }
 
-      if ((entry.data?.length ?? 0) > 0) {
-        noHistory = false;
-      }
+    if (preferences.browserSelectionMode === "installed") {
+      return isBrowserInstalled(browser);
+    } else if (preferences.browserSelectionMode === "custom") {
+      return preferences[`enable${browser}` as keyof Preferences];
+    }
 
-      return (
-        <List.Section title={entry.browser || ""} key={entry.browser}>
-          {entry.data?.map((e) => <ListEntries.HistoryEntry entry={e} key={e.id} />)}
-        </List.Section>
-      );
+    // Default 'all' selection mode
+    return true;
+  });
+
+  // 2. Resolve active profiles and database paths
+  const activeProfiles = enabledBrowsers.flatMap((browser) => {
+    const profiles = resolveProfilePaths(browser);
+    return profiles.map((p) => ({
+      key: `${browser}-${p.name}`,
+      browser,
+      profileName: p.name,
+      dbPath: p.dbPath,
+    }));
+  });
+
+  // Sort sections: Priority profile first, then installed ones on top
+  if (preferences.firstInResultsMode !== "most_relevant") {
+    activeProfiles.sort((a, b) => {
+      // Prioritize the browser selected in preferences.firstInResults
+      const isPriorityA = a.browser === preferences.firstInResults;
+      const isPriorityB = b.browser === preferences.firstInResults;
+      if (isPriorityA && !isPriorityB) return -1;
+      if (!isPriorityA && isPriorityB) return 1;
+
+      // Sort installed browsers on top
+      const isInstA = isBrowserInstalled(a.browser);
+      const isInstB = isBrowserInstalled(b.browser);
+      if (isInstA && !isInstB) return -1;
+      if (!isInstA && isInstB) return 1;
+
+      return a.browser.localeCompare(b.browser);
     });
-
-  if (permissionView.length > 0) {
-    return permissionView[0];
   }
 
-  entries.sort((a, b) => a.props.title.localeCompare(b.props.title));
+  // Filter out any stale/inactive results
+  const activeResults = Object.fromEntries(
+    Object.entries(results).filter(([key]) => activeProfiles.some((p) => p.key === key)),
+  );
 
-  if (preferences.firstInResults) {
-    const firstEntry = entries.filter((e) => e.props.title === preferences.firstInResults);
-    entries = [firstEntry[0], ...entries.filter((e) => e.props.title !== preferences.firstInResults)];
+  // 3. Collect loading states and permission views
+  const isLoading =
+    Object.values(activeResults).some((r) => r.isLoading) ||
+    (activeProfiles.length > 0 && Object.keys(activeResults).length < activeProfiles.length);
+
+  const permissionViews = Object.values(activeResults)
+    .map((r) => r.permissionView)
+    .filter((v) => v !== undefined && isValidElement(v));
+
+  // If there are permission views, return the first one
+  if (permissionViews.length > 0) {
+    return permissionViews[0] as ReactElement;
   }
+
+  // Handle callback when result updates
+  const handleResult = useCallback((key: string, res: SearchResult) => {
+    setResults((prev) => {
+      const current = prev[key];
+      if (
+        current &&
+        current.isLoading === res.isLoading &&
+        current.permissionView === res.permissionView &&
+        JSON.stringify(current.data) === JSON.stringify(res.data)
+      ) {
+        return prev;
+      }
+      return { ...prev, [key]: res };
+    });
+  }, []);
+
+  const openPreferencesAction = <BrowserHistoryActions.OpenPreferences />;
+  const openCustomConfigAction = (
+    <Action
+      icon={Icon.Gear}
+      title="Configure Profile Paths"
+      shortcut={{ modifiers: ["cmd", "shift"], key: "," }}
+      onAction={() => navigation.push(<ConfigureProfilesForm />)}
+    />
+  );
+
+  // 4. Render output based on firstInResultsMode
+  let content;
+  if (preferences.firstInResultsMode === "most_relevant") {
+    const allEntries = Object.values(activeResults).flatMap((r) => r.data || []);
+    allEntries.sort((a, b) => new Date(b.lastVisited).getTime() - new Date(a.lastVisited).getTime());
+
+    const hasData = allEntries.length > 0;
+
+    content = hasData ? (
+      allEntries.map((e) => <ListEntries.HistoryEntry entry={e} key={e.id} />)
+    ) : (
+      <List.EmptyView
+        title={searchText ? `No ${searchText} history found` : "No history found"}
+        actions={
+          <ActionPanel>
+            <Action.OpenInBrowser
+              title="Search in Browser"
+              url={
+                preferences.searchEngine
+                  ? preferences.searchEngine.replace(/{{query}}/g, encodeURIComponent(searchText ?? ""))
+                  : `https://www.google.com/search?q=${encodeURIComponent(searchText ?? "")}`
+              }
+            />
+            {openCustomConfigAction}
+            {openPreferencesAction}
+          </ActionPanel>
+        }
+      />
+    );
+  } else {
+    // specific_browser mode (grouped sections)
+    const hasData = Object.values(activeResults).some((r) => (r.data?.length ?? 0) > 0);
+
+    content = hasData ? (
+      activeProfiles.map((p) => {
+        const res = activeResults[p.key];
+        if (!res || !res.data || res.data.length === 0) return null;
+        return (
+          <List.Section title={p.profileName === "Default" ? p.browser : `${p.browser} (${p.profileName})`} key={p.key}>
+            {res.data.map((e) => (
+              <ListEntries.HistoryEntry entry={e} key={e.id} />
+            ))}
+          </List.Section>
+        );
+      })
+    ) : (
+      <List.EmptyView
+        title={searchText ? `No ${searchText} history found` : "No history found"}
+        actions={
+          <ActionPanel>
+            <Action.OpenInBrowser
+              title="Search in Browser"
+              url={
+                preferences.searchEngine
+                  ? preferences.searchEngine.replace(/{{query}}/g, encodeURIComponent(searchText ?? ""))
+                  : `https://www.google.com/search?q=${encodeURIComponent(searchText ?? "")}`
+              }
+            />
+            {openCustomConfigAction}
+            {openPreferencesAction}
+          </ActionPanel>
+        }
+      />
+    );
+  }
+
+  const enabled = enabledBrowsers.length > 0;
 
   return (
-    <List onSearchTextChange={setSearchText} isLoading={isLoading.some((e) => e)} throttle={false}>
+    <List onSearchTextChange={setSearchText} isLoading={isLoading} throttle={false}>
+      {/* Hidden query components */}
+      {activeProfiles.map((p) => (
+        <BrowserProfileQuery
+          key={p.key}
+          profileKey={p.key}
+          browser={p.browser}
+          dbPath={p.dbPath}
+          searchText={searchText ?? ""}
+          onResult={handleResult}
+        />
+      ))}
+
       {!enabled ? (
         <List.EmptyView
-          title="You haven't enabled any browsers yet"
-          description="You can choose which browsers history to integrate in preferences"
+          title="You haven't enabled or installed any browsers yet"
+          description="You can choose which browsers history to integrate in preferences or configuration"
           icon={"icon-small.png"}
           actions={
             <ActionPanel>
-              <BrowserHistoryActions.OpenPreferences />
-            </ActionPanel>
-          }
-        />
-      ) : noHistory ? (
-        <List.EmptyView
-          title={searchText ? `No ${searchText} history found` : "No history found"}
-          actions={
-            <ActionPanel>
-              <Action.OpenInBrowser title="Search in Browser" url={searchUrl} />
+              {openCustomConfigAction}
+              {openPreferencesAction}
             </ActionPanel>
           }
         />
       ) : (
-        entries
+        content
       )}
     </List>
   );

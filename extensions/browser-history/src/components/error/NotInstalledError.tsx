@@ -1,15 +1,26 @@
 import { useState } from "react";
-import { ActionPanel, Detail, showToast, Toast } from "@raycast/api";
+import { ActionPanel, Detail, showToast, Toast, Cache, useNavigation } from "@raycast/api";
 import { execSync } from "child_process";
 import { SupportedBrowsers } from "../../interfaces";
 import { DEFAULT_ERROR_TITLE, DOWNLOAD_TEXT, INSTALL_COMMAND } from "../../constants";
 
 export function NotInstalledError({ browser }: { browser: SupportedBrowsers }) {
   const [isLoading, setIsLoading] = useState(false);
+  const { pop } = useNavigation();
+  const cache = new Cache();
+
   return (
     <Detail
       actions={
         <ActionPanel>
+          <ActionPanel.Item
+            title="Skip & Disable Browser"
+            onAction={async () => {
+              cache.set(`disabled_${browser}`, "true");
+              await showToast(Toast.Style.Success, "Browser Disabled", `${browser} has been disabled.`);
+              pop();
+            }}
+          />
           {!isLoading && INSTALL_COMMAND[browser] !== undefined && (
             <ActionPanel.Item
               title="Install with Homebrew"

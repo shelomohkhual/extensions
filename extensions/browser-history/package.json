@@ -26,6 +26,46 @@
       "mode": "view",
       "preferences": [
         {
+          "name": "firstInResultsMode",
+          "type": "dropdown",
+          "required": false,
+          "title": "First in Results Mode",
+          "description": "How to order and display browser history results",
+          "default": "most_relevant",
+          "data": [
+            {
+              "title": "Most Relevant (Sort all by date)",
+              "value": "most_relevant"
+            },
+            {
+              "title": "Prioritize Specific Browser",
+              "value": "specific_browser"
+            }
+          ]
+        },
+        {
+          "name": "browserSelectionMode",
+          "type": "dropdown",
+          "required": false,
+          "title": "Browser Selection Mode",
+          "description": "How to select which browsers to search",
+          "default": "all",
+          "data": [
+            {
+              "title": "All Supported Browsers",
+              "value": "all"
+            },
+            {
+              "title": "Installed Browsers Only",
+              "value": "installed"
+            },
+            {
+              "title": "Custom Selection (Use checkboxes below)",
+              "value": "custom"
+            }
+          ]
+        },
+        {
           "name": "firstInResults",
           "type": "dropdown",
           "required": false,
